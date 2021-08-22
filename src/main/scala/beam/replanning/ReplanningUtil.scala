@@ -34,7 +34,12 @@ object ReplanningUtil extends LazyLogging {
               case ex: Throwable =>
                 val text1 = s"Selected size: ${person.getSelectedPlan.getPlanElements.size()}"
                 val text2 = s"Experienced size: ${experiencedPlan.getPlanElements.size()}"
-                logger.error(s"Length of selected plans less than experienced plans. $text1. $text2.")
+                logger.error(s"Length of plans is not the same. $text1. $text2.")
+                logger.error(s"The person: ${person.toString}")
+                logger.error(s"Selected plans:")
+                person.getSelectedPlan.getPlanElements.forEach(pElem => logger.error(pElem.getAttributes.toString))
+                logger.error(s"Experienced plans:")
+                experiencedPlan.getPlanElements.forEach(pElem => logger.error(pElem.getAttributes.toString))
                 logger.error(s"The exception: ${ex.toString}")
                 throw ex
             }
