@@ -16,8 +16,15 @@ import org.matsim.api.core.v01.Id
 //  - Run it from gradle: `./gradlew :execute -PmainClass=beam.router.R5Requester -PmaxRAM=4 -PappArgs="['--config', 'test/input/texas/austin-prod-100k.conf']"`
 object R5Requester extends BeamHelper {
 
+//  [x=560231.5622264133][y=4193770.7868145513],
+//  [x=561610.0858156887][y=4195074.113060168],
+
   private val baseRoutingRequest: RoutingRequest = {
-    val originUTM = new Location(2961475.272057291, 3623253.4635826824)
+//    val originUTM = new Location(561138.4631951045,4193255.5600740486)
+//    val destinationUTM = new Location(561537.9235780016,4194787.375227107)
+    val originUTM = new Location(560231.5622264133,4193770.7868145513)
+    val destinationUTM = new Location(561610.0858156887,4195074.113060168)
+
     val personAttribs = AttributesOfIndividual(
       householdAttributes = HouseholdAttributes("48-453-001845-2:117138", 70000.0, 1, 1, 1),
       modalityStyle = None,
@@ -30,9 +37,9 @@ object R5Requester extends BeamHelper {
     val personId = Id.createPersonId(1)
     RoutingRequest(
       originUTM = originUTM,
-      destinationUTM = new Location(2967932.9521744307, 3635449.522501624),
+      destinationUTM = destinationUTM,
       departureTime = 30600,
-      withTransit = true,
+      withTransit = false,
       streetVehicles = Vector.empty,
       personId = Some(personId),
       attributesOfIndividual = Some(personAttribs)
@@ -46,32 +53,19 @@ object R5Requester extends BeamHelper {
 
     val carStreetVehicle =
       getStreetVehicle("dummy-car-for-skim-observations", BeamMode.CAV, baseRoutingRequest.originUTM)
-    val bikeStreetVehicle =
-      getStreetVehicle("dummy-bike-for-skim-observations", BeamMode.BIKE, baseRoutingRequest.originUTM)
-    val walkStreetVehicle =
-      getStreetVehicle("dummy-body-for-skim-observations", BeamMode.WALK, baseRoutingRequest.originUTM)
 
-    val threeModesReq = baseRoutingRequest.copy(
-      streetVehicles = Vector(carStreetVehicle, bikeStreetVehicle, walkStreetVehicle),
-      withTransit = true
-    )
-    val threeModesResp = r5Wrapper.calcRoute(threeModesReq)
-    showRouteResponse("Three Modes in one shot", threeModesResp)
-    println
+
+//    val threeModesReq = baseRoutingRequest.copy(
+//      streetVehicles = Vector(carStreetVehicle),
+//      withTransit = true
+//    )
+//    val threeModesResp = r5Wrapper.calcRoute(threeModesReq)
+//    showRouteResponse("Three Modes in one shot", threeModesResp)
+//    println
 
     val carReq = baseRoutingRequest.copy(streetVehicles = Vector(carStreetVehicle), withTransit = false)
     val carResp = r5Wrapper.calcRoute(carReq)
     showRouteResponse("Only CAR mode", carResp)
-    println
-
-    val bikeReq = baseRoutingRequest.copy(streetVehicles = Vector(bikeStreetVehicle), withTransit = false)
-    val bikeResp = r5Wrapper.calcRoute(bikeReq)
-    showRouteResponse("Only BIKE mode", bikeResp)
-    println
-
-    val walkReq = baseRoutingRequest.copy(streetVehicles = Vector(walkStreetVehicle), withTransit = true)
-    val walkResp = r5Wrapper.calcRoute(walkReq)
-    showRouteResponse("Only WALK mode with transit", walkResp)
     println
   }
 
@@ -93,7 +87,7 @@ object R5Requester extends BeamHelper {
   private def getStreetVehicle(id: String, beamMode: BeamMode, location: Location): StreetVehicle = {
     val vehicleTypeId = beamMode match {
       case BeamMode.CAR | BeamMode.CAV =>
-        "CAV"
+        "ev-L1-0-to-50000-LowTech-2035-Midsize-BEV_300_XFC"
       case BeamMode.BIKE =>
         "FAST-BIKE"
       case BeamMode.WALK =>

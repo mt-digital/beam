@@ -525,8 +525,12 @@ class R5Wrapper(workerParams: R5Parameters, travelTime: TravelTime, travelTimeNo
                 new StreetSegment(streetPath, legMode, transportNetwork.streetLayer)
               directOption.addDirect(streetSegment, profileRequest.getFromTimeDateZD)
             }
+          } else {
+            logger.debug(s"Router is not able to set destination to lat:${profileRequest.toLat} lon:${profileRequest.toLon}")
           }
         }
+      } else {
+        logger.debug(s"Router is not able to set origin to lat:${profileRequest.fromLat} lon:${profileRequest.fromLon}")
       }
     }
     directOption.summary = directOption.generateSummary
