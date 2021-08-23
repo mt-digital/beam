@@ -61,7 +61,7 @@ class BeamMobsim @Inject()(
 ) extends Mobsim
     with LazyLogging
     with MetricsSupport {
-  private implicit val timeout: Timeout = Timeout(50000, TimeUnit.SECONDS)
+  private implicit val timeout: Timeout = Timeout(100000, TimeUnit.SECONDS)
 
   override def run(): Unit = {
     logger.info("Starting Iteration")
