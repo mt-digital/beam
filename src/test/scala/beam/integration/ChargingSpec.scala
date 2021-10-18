@@ -4,6 +4,7 @@ import beam.agentsim.agents.vehicles.BeamVehicleType
 import beam.agentsim.agents.vehicles.FuelType.Electricity
 import beam.agentsim.events._
 import beam.agentsim.infrastructure.charging.ChargingPointType
+import beam.agentsim.infrastructure.ParkingStall
 import beam.router.Modes.BeamMode
 import beam.sim.config.{BeamConfig, MatSimBeamConfigBuilder}
 import beam.sim.population.DefaultPopulationAdjustment
@@ -35,7 +36,7 @@ class ChargingSpec extends AnyFlatSpec with Matchers with BeamHelper {
     .parseString(
       s"""|beam.outputs.events.fileOutputFormats = csv
          |beam.physsim.skipPhysSim = true
-         |beam.agentsim.lastIteration = 0
+         |beam.agentsim.lastIteration = 1
          |beam.agentsim.tuning.transitCapacity = 0.0
          |beam.agentsim.agents.rideHail.initialization.procedural.fractionOfInitialVehicleFleet = 0
          |beam.agentsim.agents.vehicles.sharedFleets = []
@@ -57,9 +58,18 @@ class ChargingSpec extends AnyFlatSpec with Matchers with BeamHelper {
     val scenario = ScenarioUtils.loadScenario(matsimConfig).asInstanceOf[MutableScenario]
     scenario.setNetwork(beamScenario.network)
 
-    val chargingPlugInEvents: ArrayBuffer[Double] = new ArrayBuffer[Double]()
-    val chargingPlugOutEvents: ArrayBuffer[Double] = new ArrayBuffer[Double]()
-    val refuelSessionEvents: ArrayBuffer[(Double, Long, Double)] = new ArrayBuffer[(Double, Long, Double)]()
+    // Initialize array to track when the single car plugs in and unplugs.
+    val chargingPlugInEvents: ArrayBuffer[(Double, ParkingStall, Double)] = 
+      new ArrayBuffer[(Double, ParkingStall, Double)]()
+    val chargingPlugOutEvents: ArrayBuffer[(Double, ParkingStall, Double)] = 
+      new ArrayBuffer[(Double, ParkingStall, Double)]()
+
+    // Initialize array to track refueling events. Should this be empty at
+    // the end of a simulation since the only car is an electric car (see
+    // vehicleTypes-simple.csv for beamVilleCar, which seems to be the one
+    // tested here.
+    val refuelSessionEvents: ArrayBuffer[(Double, ParkingStall, Double, Long, Double)] = 
+      new ArrayBuffer[(Double, ParkingStall, Double, Long, Double)]()
     var energyConsumed: Double = 0.0
 
     val injector = org.matsim.core.controler.Injector.createInjector(
@@ -70,26 +80,25 @@ class ChargingSpec extends AnyFlatSpec with Matchers with BeamHelper {
           addEventHandlerBinding().toInstance(new BasicEventHandler {
             override def handleEvent(event: Event): Unit = {
               event match {
-                case ChargingPlugInEvent(_, _, _, `vehicleId`, fuelLevel, _) => chargingPlugInEvents += fuelLevel
-                case ChargingPlugOutEvent(_, _, `vehicleId`, fuelLevel, _)   => chargingPlugOutEvents += fuelLevel
-                case RefuelSessionEvent(
-                      _,
-                      stall,
-                      energyInJoules,
-                      _,
-                      sessionDuration,
-                      `vehicleId`,
-                      _,
-                      _,
-                      _
-                    ) =>
-                  refuelSessionEvents += (
-                    (
-                      energyInJoules,
-                      sessionDuration.toLong,
-                      ChargingPointType.getChargingPointInstalledPowerInKw(stall.chargingPointType.get)
+                case ChargingPlugInEvent(tick, stall, _, `vehicleId`, fuelLevel, _) 
+                  => chargingPlugInEvents += ((tick, stall, fuelLevel))
+
+                case ChargingPlugOutEvent(tick, stall, `vehicleId`, fuelLevel, _)   
+                  => chargingPlugOutEvents += ((tick, stall, fuelLevel))
+
+                case RefuelSessionEvent(tick, stall, energyInJoules, _, 
+                                        sessionDuration, `vehicleId`, _, _, _)
+                  => refuelSessionEvents += (
+                      (
+                        tick,
+                        stall,
+                        energyInJoules,
+                        sessionDuration.toLong,
+                        ChargingPointType.getChargingPointInstalledPowerInKw(
+                          stall.chargingPointType.get
+                        )
+                      )
                     )
-                  )
                 case e: PathTraversalEvent if e.vehicleId == vehicleId =>
                   energyConsumed += e.primaryFuelConsumed
                 case _ =>
@@ -106,10 +115,11 @@ class ChargingSpec extends AnyFlatSpec with Matchers with BeamHelper {
     val services = injector.getInstance(classOf[BeamServices])
     val transportNetwork = injector.getInstance(classOf[TransportNetwork])
 
-    // 3 person in a single household in the town
+    // Limit population to 3 in a single household in Beamville by removing
+    // person 4 to 50...
     val population = scenario.getPopulation
     (4 to 50).map(Id.create(_, classOf[Person])).foreach(population.removePerson)
-
+    // ...and by removing all households but household 1.
     val households = scenario.getHouseholds
     (2 to 21).map(Id.create(_, classOf[Household])).foreach(households.getHouseholds.remove)
 
@@ -134,8 +144,8 @@ class ChargingSpec extends AnyFlatSpec with Matchers with BeamHelper {
 
     val chargingPlugInEventsAmount = chargingPlugInEvents.size
     val chargingPlugOutEventsAmount = chargingPlugOutEvents.size
-    val totalEnergyInJoules = refuelSessionEvents.map(_._1).sum
-    val totalSessionDuration = refuelSessionEvents.map(_._2).sum
+    val totalEnergyInJoules = refuelSessionEvents.map(_._3).sum
+    val totalSessionDuration = refuelSessionEvents.map(_._4).sum
 
     assume(totalEnergyInJoules > 0, "totalEnergyInJoules should be non zero")
     assume(totalSessionDuration > 0, "totalSessionDuration should be non zero")
@@ -146,13 +156,17 @@ class ChargingSpec extends AnyFlatSpec with Matchers with BeamHelper {
     chargingPlugInEventsAmount should equal(chargingPlugOutEventsAmount)
 
     // ensure each refuel event is difference of amounts of fuel before and after charging
-    refuelSessionEvents.zipWithIndex foreach { case ((energyAdded, _, _), id) =>
-      chargingPlugInEvents(id) + energyAdded shouldBe chargingPlugOutEvents(id)
+    refuelSessionEvents.zipWithIndex foreach { case ((_, _, energyAdded, _, _), id) =>
+      chargingPlugInEvents(id)._3 + energyAdded shouldBe chargingPlugOutEvents(id)._3
     }
 
-    val energyChargedInKWh = refuelSessionEvents.map(_._1).sum / 3.6e+6
-    val powerPerTime = refuelSessionEvents.map(s => s._2 / 3600.0 * s._3).sum
+    val energyChargedInKWh = refuelSessionEvents.map(_._3).sum / 3.6e+6
+    val powerPerTime = refuelSessionEvents.map(s => (s._4 / 3600.0) * s._5).sum
     energyChargedInKWh shouldBe (powerPerTime +- 0.01)
+    //
+    // Check that there is a charging event for start of simulation for both iterations.
+    val fuelSeshsAtTick0 = refuelSessionEvents.filter(event => event._1 == 0)
+    fuelSeshsAtTick0.length shouldBe 2
     // consumed energy should be more or less equal total added energy
     // TODO Hard to test this without ensuring an energy conservation mechanism
     // totalEnergyInJoules shouldBe (energyConsumed +- 1000)
